@@ -1,41 +1,361 @@
-# Prerequisites
-*.d
+import React, { useState, useEffect, useRef } from 'react';
+import { Play, RotateCcw } from 'lucide-react';
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+const SuikaGame = () => {
+  const canvasRef = useRef(null);
+  const [score, setScore] = useState(0);
+  const [gameOver, setGameOver] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
+  const gameStateRef = useRef({
+    bodies: [],
+    nextFruit: 0,
+    dropX: 250,
+    canDrop: true,
+    animationId: null
+  });
 
-# Precompiled Headers
-*.gch
-*.pch
+  const fruits = [
+    { name: 'さくらんぼ', radius: 15, color: '#ff6b9d', score: 1 },
+    { name: 'いちご', radius: 20, color: '#ff4757', score: 3 },
+    { name: 'ぶどう', radius: 25, color: '#a29bfe', score: 6 },
+    { name: 'みかん', radius: 30, color: '#ffa502', score: 10 },
+    { name: 'りんご', radius: 35, color: '#ff6348', score: 15 },
+    { name: 'なし', radius: 40, color: '#fffa65', score: 21 },
+    { name: 'もも', radius: 45, color: '#ffb3ba', score: 28 },
+    { name: 'パイン', radius: 50, color: '#fff44f', score: 36 },
+    { name: 'メロン', radius: 55, color: '#b8e994', score: 45 },
+    { name: 'すいか', radius: 60, color: '#26de81', score: 55 }
+  ];
 
-# Linker files
-*.ilk
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-# Debugger Files
-*.pdb
+    const ctx = canvas.getContext('2d');
+    const state = gameStateRef.current;
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+    const gravity = 0.3;
+    const friction = 0.99;
+    const restitution = 0.3;
+    const wallLeft = 50;
+    const wallRight = 450;
+    const wallBottom = 550;
+    const gameOverLine = 100;
 
-# Fortran module files
-*.mod
-*.smod
+    const checkCollision = (b1, b2) => {
+      const dx = b2.x - b1.x;
+      const dy = b2.y - b1.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      return dist < b1.radius + b2.radius;
+    };
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+    const resolveCollision = (b1, b2) => {
+      const dx = b2.x - b1.x;
+      const dy = b2.y - b1.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist === 0) return;
 
-# Executables
-*.exe
-*.out
-*.app
+      const overlap = b1.radius + b2.radius - dist;
+      const nx = dx / dist;
+      const ny = dy / dist;
 
-# debug information files
-*.dwo
+      b1.x -= nx * overlap * 0.5;
+      b1.y -= ny * overlap * 0.5;
+      b2.x += nx * overlap * 0.5;
+      b2.y += ny * overlap * 0.5;
+
+      const dvx = b2.vx - b1.vx;
+      const dvy = b2.vy - b1.vy;
+      const dvn = dvx * nx + dvy * ny;
+
+      if (dvn > 0) return;
+
+      const impulse = -(1 + restitution) * dvn / 2;
+
+      b1.vx -= impulse * nx;
+      b1.vy -= impulse * ny;
+      b2.vx += impulse * nx;
+      b2.vy += impulse * ny;
+    };
+
+    const mergeFruits = (b1, b2) => {
+      if (b1.type !== b2.type || b1.type >= fruits.length - 1) return false;
+
+      const newType = b1.type + 1;
+      const newX = (b1.x + b2.x) / 2;
+      const newY = (b1.y + b2.y) / 2;
+
+      state.bodies = state.bodies.filter(b => b !== b1 && b !== b2);
+      
+      state.bodies.push({
+        x: newX,
+        y: newY,
+        vx: 0,
+        vy: 0,
+        radius: fruits[newType].radius,
+        type: newType,
+        merged: true
+      });
+
+      setScore(s => s + fruits[newType].score);
+      return true;
+    };
+
+    const update = () => {
+      state.bodies.forEach(body => {
+        body.vy += gravity;
+        body.vx *= friction;
+        body.vy *= friction;
+
+        body.x += body.vx;
+        body.y += body.vy;
+
+        if (body.x - body.radius < wallLeft) {
+          body.x = wallLeft + body.radius;
+          body.vx *= -restitution;
+        }
+        if (body.x + body.radius > wallRight) {
+          body.x = wallRight - body.radius;
+          body.vx *= -restitution;
+        }
+        if (body.y + body.radius > wallBottom) {
+          body.y = wallBottom - body.radius;
+          body.vy *= -restitution;
+          body.vx *= 0.95;
+        }
+      });
+
+      for (let i = 0; i < state.bodies.length; i++) {
+        for (let j = i + 1; j < state.bodies.length; j++) {
+          const b1 = state.bodies[i];
+          const b2 = state.bodies[j];
+          
+          if (checkCollision(b1, b2)) {
+            if (b1.type === b2.type && !b1.merged && !b2.merged) {
+              mergeFruits(b1, b2);
+              break;
+            } else {
+              resolveCollision(b1, b2);
+            }
+          }
+        }
+      }
+
+      state.bodies.forEach(body => {
+        body.merged = false;
+      });
+
+      const aboveLine = state.bodies.some(b => 
+        b.y - b.radius < gameOverLine && b.vy < 0.1 && Math.abs(b.vx) < 0.1
+      );
+      
+      if (aboveLine && state.bodies.length > 5) {
+        setTimeout(() => {
+          const stillAbove = state.bodies.some(b => 
+            b.y - b.radius < gameOverLine && b.vy < 0.1 && Math.abs(b.vx) < 0.1
+          );
+          if (stillAbove) {
+            setGameOver(true);
+            setGameStarted(false);
+          }
+        }, 2000);
+      }
+    };
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#ffeaa7';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = '#2d3436';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(wallLeft, 50);
+      ctx.lineTo(wallLeft, wallBottom);
+      ctx.lineTo(wallRight, wallBottom);
+      ctx.lineTo(wallRight, 50);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#ff7675';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(wallLeft, gameOverLine);
+      ctx.lineTo(wallRight, gameOverLine);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (gameStarted && state.canDrop) {
+        const fruit = fruits[state.nextFruit];
+        ctx.fillStyle = fruit.color;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.arc(state.dropX, 70, fruit.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      state.bodies.forEach(body => {
+        const fruit = fruits[body.type];
+        
+        const grad = ctx.createRadialGradient(
+          body.x - body.radius * 0.3,
+          body.y - body.radius * 0.3,
+          0,
+          body.x,
+          body.y,
+          body.radius
+        );
+        grad.addColorStop(0, fruit.color + 'dd');
+        grad.addColorStop(1, fruit.color);
+        
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(body.x, body.y, body.radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+    };
+
+    const gameLoop = () => {
+      if (gameStarted && !gameOver) {
+        update();
+        draw();
+        state.animationId = requestAnimationFrame(gameLoop);
+      } else {
+        draw();
+      }
+    };
+
+    gameLoop();
+
+    return () => {
+      if (state.animationId) {
+        cancelAnimationFrame(state.animationId);
+      }
+    };
+  }, [gameStarted, gameOver]);
+
+  const handleMouseMove = (e) => {
+    if (!gameStarted || !gameStateRef.current.canDrop) return;
+    
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    
+    const fruit = fruits[gameStateRef.current.nextFruit];
+    const wallLeft = 50;
+    const wallRight = 450;
+    
+    gameStateRef.current.dropX = Math.max(
+      wallLeft + fruit.radius,
+      Math.min(wallRight - fruit.radius, x)
+    );
+  };
+
+  const handleClick = () => {
+    const state = gameStateRef.current;
+    if (!gameStarted || !state.canDrop || gameOver) return;
+
+    const fruit = fruits[state.nextFruit];
+    state.bodies.push({
+      x: state.dropX,
+      y: 70,
+      vx: 0,
+      vy: 0,
+      radius: fruit.radius,
+      type: state.nextFruit,
+      merged: false
+    });
+
+    state.canDrop = false;
+    setTimeout(() => {
+      state.canDrop = true;
+    }, 500);
+
+    state.nextFruit = Math.floor(Math.random() * 5);
+  };
+
+  const startGame = () => {
+    setGameStarted(true);
+    setGameOver(false);
+    setScore(0);
+    gameStateRef.current.bodies = [];
+    gameStateRef.current.nextFruit = Math.floor(Math.random() * 5);
+    gameStateRef.current.dropX = 250;
+    gameStateRef.current.canDrop = true;
+  };
+
+  const resetGame = () => {
+    setGameStarted(false);
+    setGameOver(false);
+    setScore(0);
+    gameStateRef.current.bodies = [];
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-yellow-100 to-pink-100 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl p-6">
+        <h1 className="text-4xl font-bold text-center mb-4 text-pink-600">スイカゲーム</h1>
+        
+        <div className="flex justify-between items-center mb-4">
+          <div className="text-2xl font-bold text-gray-700">
+            スコア: <span className="text-pink-600">{score}</span>
+          </div>
+          
+          {!gameStarted && !gameOver && (
+            <button
+              onClick={startGame}
+              className="flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg transition"
+            >
+              <Play size={20} />
+              スタート
+            </button>
+          )}
+          
+          {gameStarted && (
+            <button
+              onClick={resetGame}
+              className="flex items-center gap-2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg transition"
+            >
+              <RotateCcw size={20} />
+              リセット
+            </button>
+          )}
+        </div>
+
+        <canvas
+          ref={canvasRef}
+          width={500}
+          height={600}
+          onMouseMove={handleMouseMove}
+          onClick={handleClick}
+          className="border-4 border-pink-300 rounded-lg cursor-pointer bg-yellow-50"
+        />
+
+        {gameOver && (
+          <div className="mt-4 text-center">
+            <p className="text-3xl font-bold text-red-600 mb-4">ゲームオーバー！</p>
+            <button
+              onClick={startGame}
+              className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-8 rounded-lg transition mx-auto"
+            >
+              もう一度プレイ
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4 text-sm text-gray-600 text-center">
+          マウスを動かして位置を決め、クリックで果物を落とします
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SuikaGame;
